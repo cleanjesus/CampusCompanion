@@ -3,12 +3,13 @@ require("dotenv").config();
 const express = require("express");
 const fs = require("fs");
 const csv = require("csv-parser");
-const { InferenceClient } = require("@huggingface/inference");
+const AIService = require("./services/aiService");
 
 // Express app setup
 const app = express();
 app.use(express.static(__dirname + "/views"));
 app.use(express.static(__dirname + "/public"));
+app.use(express.json()); // For parsing JSON in request body
 
 const server = app.listen(3000, () => {
   console.log("Server started on http://localhost:3000");
@@ -22,8 +23,8 @@ const io = require("socket.io")(server, {
   },
 });
 
-// HuggingFace client setup
-const client = new InferenceClient(process.env.HUGGINGFACE_API_KEY);
+// AI Service setup
+const aiService = new AIService(process.env.HUGGINGFACE_API_KEY);
 
 // Mental health system prompt
 const MENTAL_HEALTH_PROMPT = `You're a supportive mental health companion for students. Not a therapist. Provide compassionate listening, guidance, and coping strategies. For serious concerns, recommend professional help.
@@ -181,27 +182,29 @@ app.get("/", (_, res) => {
   res.sendFile("index.html");
 });
 
+// API route for chat interactions
+app.post("/api/chat", async (req, res) => {
+  try {
+    const response = await aiService.getResponse(
+      getEnhancedSystemPrompt(),
+      req.body.message
+    );
+    res.json({ response });
+  } catch (error) {
+    console.error("API error:", error);
+    res.status(500).json({ error: "Failed to process message" });
+  }
+});
+
 // Socket.io event handling
 io.on("connection", (socket) => {
   socket.on("chat message", async (msg) => {
     console.log("Received message:", msg);
     try {
-      const chatCompletion = await client.chatCompletion({
-        provider: "novita",
-        model: "deepseek-ai/DeepSeek-V3-0324",
-        messages: [
-          {
-            role: "system",
-            content: getEnhancedSystemPrompt(),
-          },
-          {
-            role: "user",
-            content: msg,
-          },
-        ],
-      });
-
-      const response = chatCompletion.choices[0].message.content;
+      const response = await aiService.getResponse(
+        getEnhancedSystemPrompt(),
+        msg
+      );
       console.log("Bot response:", response);
       socket.emit("bot response", response);
     } catch (error) {
